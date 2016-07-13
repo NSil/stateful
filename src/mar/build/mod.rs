@@ -13,6 +13,7 @@ pub struct CFG {
 pub struct Builder<'a, 'b: 'a> {
     cx: &'a ExtCtxt<'b>,
     cfg: CFG,
+    assigner: Assigner,
     scopes: Vec<scope::Scope>,
     loop_scopes: Vec<scope::LoopScope>,
     extents: Vec<CodeExtentData>,
@@ -21,11 +22,40 @@ pub struct Builder<'a, 'b: 'a> {
 #[derive(Debug)]
 pub struct Error;
 
+struct Assigner {
+    next_node_id: ast::NodeId,
+}
+
+impl fold::Folder for Assigner {
+    fn new_id(&mut self, old_id: ast::NodeId) -> ast::NodeId {
+        // assert_eq!(old_id, ast::DUMMY_NODE_ID);
+        if old_id != ast::DUMMY_NODE_ID {
+            return old_id;
+        }
+
+        let node_id = self.next_node_id;
+
+        let next_node_id = match self.next_node_id.checked_add(1) {
+            Some(next_node_id) => next_node_id,
+            None => { panic!("ran out of node ids!") }
+        };
+        self.next_node_id = next_node_id;
+
+        node_id
+    }
+
+    fn fold_mac(&mut self, mac: ast::Mac) -> ast::Mac {
+        fold::noop_fold_mac(mac, self)
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // construct() -- the main entry point for building SMIR for a function
 
 pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
-    let item = assign_node_ids(item);
+
+    let mut assigner = Assigner { next_node_id: 1 };
+    let item = assign_node_ids(&mut assigner, item);
 
     let (fn_decl, unsafety, constness, abi, generics, ast_block) = match item.node {
         ItemKind::Fn(ref fn_decl, unsafety, constness, abi, ref generics, ref block) => {
@@ -43,6 +73,7 @@ pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
             basic_blocks: vec![],
             var_decls: vec![],
         },
+        assigner: assigner,
         scopes: vec![],
         loop_scopes: vec![],
         extents: vec![],
@@ -98,32 +129,8 @@ pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
     })
 }
 
-fn assign_node_ids(item: P<ast::Item>) -> P<ast::Item> {
-    struct Assigner {
-        next_node_id: ast::NodeId,
-    }
-
-    impl fold::Folder for Assigner {
-        fn new_id(&mut self, old_id: ast::NodeId) -> ast::NodeId {
-            assert_eq!(old_id, ast::DUMMY_NODE_ID);
-            let node_id = self.next_node_id;
-
-            let next_node_id = match self.next_node_id.checked_add(1) {
-                Some(next_node_id) => next_node_id,
-                None => { panic!("ran out of node ids!") }
-            };
-            self.next_node_id = next_node_id;
-
-            node_id
-        }
-
-        fn fold_mac(&mut self, mac: ast::Mac) -> ast::Mac {
-            fold::noop_fold_mac(mac, self)
-        }
-    }
-
-    let mut assigner = Assigner { next_node_id: 1 };
-    let mut items = fold::Folder::fold_item(&mut assigner, item);
+fn assign_node_ids(assigner: &mut Assigner, item: P<ast::Item>) -> P<ast::Item> {
+    let mut items = fold::Folder::fold_item(assigner, item);
     assert_eq!(items.len(), 1);
     items.pop().unwrap()
 }

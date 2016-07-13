@@ -5,6 +5,7 @@ use mar::repr::*;
 use syntax::ast::{self, ExprKind};
 use syntax::codemap::Span;
 use syntax::ptr::P;
+use syntax::fold::Folder;
 
 impl<'a, 'b: 'a> Builder<'a, 'b> {
     pub fn expr(&mut self,
@@ -152,6 +153,7 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                     .stmt().build_expr(loop_)
                     .build();
 
+                let expr = self.assigner.fold_expr(expr);
                 self.expr(extent, block, &expr)
             }
             ExprKind::IfLet(ref pat, ref expr, ref then_block, ref else_block) => {
@@ -184,6 +186,7 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                     .with_arm(else_arm)
                     .build();
 
+                let expr = self.assigner.fold_expr(expr);
                 self.expr(extent, block, &expr)
             }
             ExprKind::WhileLet(ref pat, ref expr, ref then_block, label) => {
@@ -228,6 +231,7 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                     .stmt().build_expr(match_expr)
                     .build();
 
+                let loop_expr = self.assigner.fold_expr(loop_expr);
                 self.expr(extent, block, &loop_expr)
             }
             _ => {
