@@ -21,6 +21,9 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                 extent: CodeExtent,
                 block: BasicBlock,
                 stmt: &ast::Stmt) -> BasicBlock {
+
+        self.scope_tracker.current_block().push_node(stmt.id);
+
         match stmt.node {
             StmtKind::Expr(ref expr) | StmtKind::Semi(ref expr) => {
                 // Ignore empty statements.

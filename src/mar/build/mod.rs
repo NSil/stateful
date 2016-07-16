@@ -15,6 +15,8 @@ pub struct Builder<'a, 'b: 'a> {
     cx: &'a ExtCtxt<'b>,
     cfg: CFG,
     scopes: Vec<scope::Scope>,
+    scope_tracker: scope_tracking::ScopeTracker,
+    scope_counter: scope_tracking::ScopeCounter,
     loop_scopes: Vec<scope::LoopScope>,
     extents: Vec<CodeExtentData>,
 }
@@ -40,6 +42,8 @@ pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
         }
     };
 
+    let (tracker, counter) = scope_tracking::ScopeTracker::new();
+
     let mut builder = Builder {
         cx: cx,
         cfg: CFG {
@@ -47,6 +51,8 @@ pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
             var_decls: vec![],
         },
         scopes: vec![],
+        scope_tracker: tracker,
+        scope_counter: counter,
         loop_scopes: vec![],
         extents: vec![],
     };
@@ -133,3 +139,4 @@ mod scope;
 mod stmt;
 mod transition;
 mod simplify;
+mod scope_tracking;
