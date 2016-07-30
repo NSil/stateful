@@ -26,7 +26,7 @@ impl ScopeTracker {
 
     #[allow(unknown_lints, needless_lifetimes)]
     pub fn find_scope<'p>(&'p mut self, id: ScopeId) -> &'p mut Scope {
-        self.root.walk(&|scope: &'p mut Scope| {
+        self.root.walk(&mut |scope: &'p mut Scope| {
             if scope.id() == id {
                 Some(scope)
             } else {
@@ -80,7 +80,7 @@ pub struct IfScope {
 
 impl IfScope {
     #[allow(unknown_lints, needless_lifetimes)]
-    fn walk<'s, T: 's, F: Fn(&'s mut Scope) -> Option<T> >(&'s mut self, f: &F) -> Option<T> {
+    fn walk<'s, T: 's, F: FnMut(&'s mut Scope) -> Option<T> >(&'s mut self, f: &mut F) -> Option<T> {
         if let Some(v) = self.then.walk(f) {
             return Some(v);
         }
@@ -104,7 +104,7 @@ pub struct MatchScope {
 
 impl MatchScope {
     #[allow(unknown_lints, needless_lifetimes)]
-    fn walk<'s, T: 's, F: Fn(&'s mut Scope) -> Option<T> >(&'s mut self, f: &F) -> Option<T> {
+    fn walk<'s, T: 's, F: FnMut(&'s mut Scope) -> Option<T> >(&'s mut self, f: &mut F) -> Option<T> {
         for scope in &mut self.arms {
             if let Some(v) = scope.walk(f) {
                 return Some(v);
@@ -207,7 +207,7 @@ impl BlockScope {
     }
 
     #[allow(unknown_lints, needless_lifetimes)]
-    fn walk<'s, T: 's, F: Fn(&'s mut Scope) -> Option<T> >(&'s mut self, f: &F) -> Option<T> {
+    fn walk<'s, T: 's, F: FnMut(&'s mut Scope) -> Option<T> >(&'s mut self, f: &mut F) -> Option<T> {
         for scope in self.scopes() {
             if let Some(v) = scope.walk(f) {
                 return Some(v);
@@ -258,7 +258,7 @@ impl Scope {
     }
 
     #[allow(unknown_lints, needless_lifetimes)]
-    fn walk<'s, T: 's, F: Fn(&'s mut Scope) -> Option<T> >(&'s mut self, f: &F) -> Option<T> {
+    pub fn walk<'s, T: 's, F: FnMut(&'s mut Scope) -> Option<T> >(&'s mut self, f: &mut F) -> Option<T> {
         let _self = self as * mut _;
 
         if let Some(v) = f(unsafe { &mut *_self }) {

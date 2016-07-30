@@ -2,18 +2,20 @@ use aster::AstBuilder;
 
 use syntax::ast::{self, Expr, ExprKind, Pat,
                   Block, SpannedIdent, Item};
+use syntax::ext::base::ExtCtxt;
 use syntax::fold::{self, Folder};
 use syntax::ptr::P;
 use syntax::codemap::{respan, Span};
 
 use mar::build::transition::ContainsTransition;
 
-pub fn simplify_item(item: P<Item>) -> Item {
+pub fn simplify_item(item: P<Item>) -> (Item, u32) {
     let mut expander = Expander::new();
     let mut assigner = Assigner { next_node_id: 1 };
 
     let expanded = expander.fold_item_simple(item.unwrap());
-    assigner.fold_item_simple(expanded)
+    let assigned = assigner.fold_item_simple(expanded);
+    (assigned, (assigner.next_node_id - 1) as u32)
 }
 
 pub struct Assigner {

@@ -28,8 +28,8 @@ pub struct Error;
 ///////////////////////////////////////////////////////////////////////////
 // construct() -- the main entry point for building SMIR for a function
 
-pub fn construct(cx: &ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
-    let item = simplify_item(item);
+pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
+    let (item, count) = simplify_item(item);
 
     let (fn_decl, unsafety, constness, abi, generics, ast_block) = match item.node {
         ItemKind::Fn(fn_decl, unsafety, constness, abi, generics, block) => {
