@@ -15,8 +15,6 @@ pub struct Builder<'a, 'b: 'a> {
     cx: &'a ExtCtxt<'b>,
     cfg: CFG,
     scopes: Vec<scope::Scope>,
-    scope_tracker: scope_tracking::ScopeTracker,
-    scope_counter: scope_tracking::ScopeCounter,
     loop_scopes: Vec<scope::LoopScope>,
     extents: Vec<CodeExtentData>,
 }
@@ -29,7 +27,7 @@ pub struct Error;
 // construct() -- the main entry point for building SMIR for a function
 
 pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
-    let (item, count) = simplify_item(item);
+    let (item, _) = simplify_item(item);
 
     let (fn_decl, unsafety, constness, abi, generics, ast_block) = match item.node {
         ItemKind::Fn(fn_decl, unsafety, constness, abi, generics, block) => {
@@ -42,8 +40,6 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
         }
     };
 
-    let (tracker, counter) = scope_tracking::ScopeTracker::new();
-
     let mut builder = Builder {
         cx: cx,
         cfg: CFG {
@@ -51,8 +47,6 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
             var_decls: vec![],
         },
         scopes: vec![],
-        scope_tracker: tracker,
-        scope_counter: counter,
         loop_scopes: vec![],
         extents: vec![],
     };
@@ -139,4 +133,5 @@ mod scope;
 mod stmt;
 mod transition;
 mod simplify;
+#[allow(dead_code)]
 mod scope_tracking;

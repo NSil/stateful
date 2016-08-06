@@ -2,7 +2,6 @@ use aster::AstBuilder;
 
 use syntax::ast::{self, Expr, ExprKind, Pat,
                   Block, SpannedIdent, Item};
-use syntax::ext::base::ExtCtxt;
 use syntax::fold::{self, Folder};
 use syntax::ptr::P;
 use syntax::codemap::{respan, Span};

@@ -1,6 +1,5 @@
 use mar::build::Builder;
 use mar::build::scope::LoopScope;
-use mar::build::scope_tracking;
 use mar::repr::*;
 use syntax::ast::{self, ExprKind};
 use syntax::codemap::Span;
@@ -52,20 +51,9 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                     targets: (then_block, else_block),
                 });
 
-                let prev_id = self.scope_tracker.current_scope;
-                let (then_id, else_id) = self.scope_tracker.current_block()
-                                                           .create_child_if(&mut self.scope_counter,
-                                                                            else_expr.is_some());
-
-                self.scope_tracker.set_current_block(then_id);
                 then_block = self.into(extent, then_block, then_expr);
-
-                if let Some(id) = else_id {
-                    self.scope_tracker.set_current_block(id);
-                }
                 else_block = self.into(extent, else_block, else_expr);
 
-                self.scope_tracker.set_current_block(prev_id);
                 let join_block = self.start_new_block(expr.span, Some("IfJoin"));
 
                 self.terminate(
@@ -153,13 +141,9 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                 body_block = loop_block;
             }
 
-            let prev_id = this.scope_tracker.current_scope;
-            let new_id = this.scope_tracker.current_block().create_child_block(&mut this.scope_counter).id;
-            this.scope_tracker.set_current_block(new_id);
-
             // execute the body, branching back to the test
             let body_block_end = this.into(extent, body_block, body);
-            this.scope_tracker.set_current_block(prev_id);
+
             this.terminate(
                 body.span,
                 body_block_end,

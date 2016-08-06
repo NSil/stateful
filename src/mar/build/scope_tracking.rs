@@ -1,5 +1,4 @@
-// use syntax::ast::NodeId;
-pub type NodeId = u32;
+use syntax::ast::{NodeId, ExprKind, Expr, Stmt, StmtKind, Block};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(u32);
@@ -23,6 +22,76 @@ impl ScopeTracker {
             current_scope: new_id,
         }, counter)
     }
+
+    pub fn from_expr(e: Expr) -> ScopeTracker{
+        let (mut tracker, mut counter) = ScopeTracker::new();
+        tracker.mutate_from_expr(&mut counter, &e);
+        tracker
+    }
+
+    fn mutate_from_expr(&mut self, counter: &mut ScopeCounter, e: &Expr) {
+        match e.node {
+            ExprKind::If(_, ref then_expr, ref else_expr) => {
+                let prev_id = self.current_scope;
+                let (then_id, else_id) = self.current_block()
+                                             .create_child_if(counter,
+                                                              else_expr.is_some());
+                self.set_current_block(then_id);
+                self.mutate_from_block(counter, then_expr);
+
+                if let (Some(id), &Some(ref else_expr)) = (else_id, else_expr) {
+                    self.set_current_block(id);
+                    self.mutate_from_expr(counter, else_expr);
+                }
+
+                self.set_current_block(prev_id);
+            }
+            ExprKind::Loop(ref body, _) => {
+                self.mutate_from_block(counter, body);
+            }
+            ExprKind::While(_, ref body, _) => {
+                // cond will not contain a transition / decl
+                self.mutate_from_block(counter, body);
+            }
+            ExprKind::Match(_, ref arms) => {
+                let prev_id = self.current_scope;
+                let match_id = self.current_block().create_child_match(counter);
+
+                for arm in arms.iter() {
+                    let arm_scope_id = self.find_scope(match_id)
+                                           .as_match()
+                                           .new_arm(counter).id;
+
+                    self.set_current_block(arm_scope_id);
+                    self.mutate_from_expr(counter, &arm.body);
+                    self.set_current_block(match_id);
+                }
+                self.set_current_block(prev_id);
+            }
+            ExprKind::Block(ref block) => {
+                self.mutate_from_block(counter, block);
+            }
+            _ => {}
+        }
+    }
+
+    fn mutate_from_stmt(&mut self, counter: &mut ScopeCounter, stmt: &Stmt) {
+        self.current_block().push_node(stmt.id);
+        match stmt.node {
+            StmtKind::Semi(ref expr) | StmtKind::Expr(ref expr) => {
+                self.mutate_from_expr(counter, expr);
+            }
+            _ => {}
+        }
+    }
+
+    fn mutate_from_block(&mut self, counter: &mut ScopeCounter, node: &Block) {
+        for stmt in &node.stmts {
+            self.mutate_from_stmt(counter, stmt);
+        }
+    }
+
+
 
     #[allow(unknown_lints, needless_lifetimes)]
     pub fn find_scope<'p>(&'p mut self, id: ScopeId) -> &'p mut Scope {
@@ -301,3 +370,5 @@ impl ScopeOrNode {
         }
     }
 }
+
+
