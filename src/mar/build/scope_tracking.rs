@@ -1,7 +1,35 @@
-use syntax::ast::{NodeId, ExprKind, Expr, Stmt, StmtKind, Block};
+use syntax::ast::{self, NodeId, ExprKind, Expr, Stmt, StmtKind, Block};
+use syntax::visit;
+use std::ascii::AsciiExt;
+
+macro_rules! x_counter {
+    ($indextype:ident, $name:ident) => (
+        pub struct $name {
+            counter: u32,
+        }
+
+        impl $name {
+            fn generate_new_id(&mut self) -> $indextype {
+                self.counter += 1;
+                $indextype(self.counter - 1)
+            }
+        }
+    )
+}
+
+x_counter!(ScopeId, ScopeCounter);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DeclId(u32);
+
+#[derive(Debug)]
+pub struct Decl {
+    ident: ast::Ident,
+    id: NodeId,
+    is_initialized: bool,
+}
 
 pub struct ScopeTracker {
     root: Scope,
@@ -18,6 +46,7 @@ impl ScopeTracker {
                 id: new_id,
                 parent_id: None,
                 children: vec![],
+                decls: vec![],
             }),
             current_scope: new_id,
         }, counter)
@@ -81,6 +110,19 @@ impl ScopeTracker {
             StmtKind::Semi(ref expr) | StmtKind::Expr(ref expr) => {
                 self.mutate_from_expr(counter, expr);
             }
+            StmtKind::Local(ref local) => {
+                self.current_block().decls.extend(
+                    get_decls_from_pat(&local.pat)
+                    .into_iter()
+                    .map(|(id, identifier)| {
+                        Decl {
+                            ident: identifier,
+                            id: id,
+                            is_initialized: local.init.is_some(),
+                        }
+                    })
+                );
+            }
             _ => {}
         }
     }
@@ -90,8 +132,6 @@ impl ScopeTracker {
             self.mutate_from_stmt(counter, stmt);
         }
     }
-
-
 
     #[allow(unknown_lints, needless_lifetimes)]
     pub fn find_scope<'p>(&'p mut self, id: ScopeId) -> &'p mut Scope {
@@ -116,27 +156,6 @@ impl ScopeTracker {
     pub fn set_current_block(&mut self, id: ScopeId) {
         self.current_scope = id;
     }
-}
-
-pub struct ScopeCounter {
-    counter: u32
-}
-
-impl ScopeCounter {
-
-    fn generate_new_id(&mut self) -> ScopeId {
-        self.counter += 1;
-        ScopeId(self.counter - 1)
-    }
-
-    fn new_block(&mut self, parent_id: ScopeId) -> BlockScope {
-        BlockScope {
-            id: self.generate_new_id(),
-            parent_id: Some(parent_id),
-            children: vec![],
-        }
-    }
-
 }
 
 #[derive(Debug)]
@@ -184,7 +203,7 @@ impl MatchScope {
     }
 
     pub fn new_arm(&mut self, counter: &mut ScopeCounter) -> &mut BlockScope {
-        let new_block = counter.new_block(self.id);
+        let new_block = BlockScope::new(counter, self.id);
         self.arms.push(Scope::Block(new_block));
         self.arms.last_mut().unwrap().as_block()
     }
@@ -195,9 +214,19 @@ pub struct BlockScope {
     pub id: ScopeId,
     pub parent_id: Option<ScopeId>,
     pub children: Vec<ScopeOrNode>,
+    pub decls: Vec<Decl>,
 }
 
 impl BlockScope {
+
+    fn new(counter: &mut ScopeCounter, parent_id: ScopeId) -> BlockScope {
+        BlockScope {
+            id: counter.generate_new_id(),
+            parent_id: Some(parent_id),
+            children: vec![],
+            decls: vec![],
+        }
+    }
 
     fn push_child(&mut self, scope: Scope) -> &mut Scope {
         self.children.push(ScopeOrNode::Scope(scope));
@@ -210,11 +239,11 @@ impl BlockScope {
 
     pub fn create_child_if(&mut self, counter: &mut ScopeCounter, has_else: bool) -> (ScopeId, Option<ScopeId>) {
         let new_id = counter.generate_new_id();
-        let then_block = Box::new(counter.new_block(new_id));
+        let then_block = Box::new(BlockScope::new(counter, new_id));
         let then_id = then_block.id;
 
         let (else_block, else_id) = if has_else {
-            let block = Box::new(counter.new_block(new_id));
+            let block = Box::new(BlockScope::new(counter, new_id));
             let new_id = block.id;
             (Some(block), Some(new_id))
         } else {
@@ -251,7 +280,7 @@ impl BlockScope {
     }
 
     pub fn create_child_block<'p>(&'p mut self, counter: &mut ScopeCounter) -> &'p mut BlockScope {
-        let new_block = counter.new_block(self.id);
+        let new_block = BlockScope::new(counter, self.id);
 
         let new_scope = self.push_child(Scope::Block(new_block));
 
@@ -372,3 +401,46 @@ impl ScopeOrNode {
 }
 
 
+// fn get_decls_from_pat(cx: &ExtCtxt, pat: &ast::Pat) -> Vec<(NodeId, ast::Ident)> {
+fn get_decls_from_pat(pat: &ast::Pat) -> Vec<(NodeId, ast::Ident)> {
+    // struct Visitor<'a, 'b: 'a> {
+    struct Visitor {
+        // cx: &'a ExtCtxt<'b>,
+        var_decls: Vec<(NodeId, ast::Ident)>,
+    }
+
+    // impl<'a, 'b: 'a> visit::Visitor for Visitor<'a, 'b> {
+    impl visit::Visitor for Visitor {
+        fn visit_pat(&mut self, pat: &ast::Pat) {
+            match pat.node {
+                ast::PatKind::Ident(ast::BindingMode::ByValue(_), id, _) => {
+                    // Consider only lower case identities as a variable.
+                    let id_str = id.node.name.as_str();
+                    let first_char = id_str.chars().next().unwrap();
+
+                    if first_char == first_char.to_ascii_lowercase() {
+                        self.var_decls.push((pat.id, id.node));
+                    }
+                }
+                ast::PatKind::Ident(..) => {
+                    panic!("Canot handle pat {:?}", pat);
+                    // self.cx.span_bug(pat.span, &format!("Canot handle pat {:?}", pat))
+                }
+                _ => { }
+            }
+
+            visit::walk_pat(self, pat);
+        }
+
+        fn visit_mac(&mut self, _mac: &ast::Mac) { }
+    }
+
+    let mut visitor = Visitor {
+        // cx: cx,
+        var_decls: Vec::new(),
+    };
+
+    visit::Visitor::visit_pat(&mut visitor, pat);
+
+    visitor.var_decls
+}
