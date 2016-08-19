@@ -31,6 +31,12 @@ pub struct Decl {
     is_initialized: bool,
 }
 
+#[derive(Debug)]
+pub enum BlockType {
+    Normal,
+    Loop,
+}
+
 pub struct ScopeTracker {
     root: Scope,
     pub current_scope: ScopeId,
@@ -47,6 +53,7 @@ impl ScopeTracker {
                 parent_id: None,
                 children: vec![],
                 decls: vec![],
+                block_type: BlockType::Normal,
             }),
             current_scope: new_id,
         }, counter)
@@ -66,7 +73,7 @@ impl ScopeTracker {
                                              .create_child_if(counter,
                                                               else_expr.is_some());
                 self.set_current_block(then_id);
-                self.mutate_from_block(counter, then_expr);
+                self.mutate_from_block(counter, then_expr, BlockType::Normal);
 
                 if let (Some(id), &Some(ref else_expr)) = (else_id, else_expr) {
                     self.set_current_block(id);
@@ -75,12 +82,9 @@ impl ScopeTracker {
 
                 self.set_current_block(prev_id);
             }
-            ExprKind::Loop(ref body, _) => {
-                self.mutate_from_block(counter, body);
-            }
-            ExprKind::While(_, ref body, _) => {
+            ExprKind::While(_, ref body, _) | ExprKind::Loop(ref body, _)=> {
                 // cond will not contain a transition / decl
-                self.mutate_from_block(counter, body);
+                self.mutate_from_block(counter, body, BlockType::Loop);
             }
             ExprKind::Match(_, ref arms) => {
                 let prev_id = self.current_scope;
@@ -98,7 +102,7 @@ impl ScopeTracker {
                 self.set_current_block(prev_id);
             }
             ExprKind::Block(ref block) => {
-                self.mutate_from_block(counter, block);
+                self.mutate_from_block(counter, block, BlockType::Normal);
             }
             _ => {}
         }
@@ -127,10 +131,16 @@ impl ScopeTracker {
         }
     }
 
-    fn mutate_from_block(&mut self, counter: &mut ScopeCounter, node: &Block) {
+    fn mutate_from_block(&mut self, counter: &mut ScopeCounter, node: &Block, block_type: BlockType) {
+        let prev_id = self.current_scope;
+        let block_id = self.current_block().create_child_block(counter, block_type);
+        self.set_current_block(block_id);
+
         for stmt in &node.stmts {
             self.mutate_from_stmt(counter, stmt);
         }
+
+        self.set_current_block(prev_id)
     }
 
     #[allow(unknown_lints, needless_lifetimes)]
@@ -203,7 +213,7 @@ impl MatchScope {
     }
 
     pub fn new_arm(&mut self, counter: &mut ScopeCounter) -> &mut BlockScope {
-        let new_block = BlockScope::new(counter, self.id);
+        let new_block = BlockScope::new(counter, self.id, BlockType::Normal);
         self.arms.push(Scope::Block(new_block));
         self.arms.last_mut().unwrap().as_block()
     }
@@ -215,16 +225,18 @@ pub struct BlockScope {
     pub parent_id: Option<ScopeId>,
     pub children: Vec<ScopeOrNode>,
     pub decls: Vec<Decl>,
+    pub block_type: BlockType,
 }
 
 impl BlockScope {
 
-    fn new(counter: &mut ScopeCounter, parent_id: ScopeId) -> BlockScope {
+    fn new(counter: &mut ScopeCounter, parent_id: ScopeId, block_type: BlockType) -> BlockScope {
         BlockScope {
             id: counter.generate_new_id(),
             parent_id: Some(parent_id),
             children: vec![],
             decls: vec![],
+            block_type: block_type,
         }
     }
 
@@ -239,11 +251,11 @@ impl BlockScope {
 
     pub fn create_child_if(&mut self, counter: &mut ScopeCounter, has_else: bool) -> (ScopeId, Option<ScopeId>) {
         let new_id = counter.generate_new_id();
-        let then_block = Box::new(BlockScope::new(counter, new_id));
+        let then_block = Box::new(BlockScope::new(counter, new_id, BlockType::Normal));
         let then_id = then_block.id;
 
         let (else_block, else_id) = if has_else {
-            let block = Box::new(BlockScope::new(counter, new_id));
+            let block = Box::new(BlockScope::new(counter, new_id, BlockType::Normal));
             let new_id = block.id;
             (Some(block), Some(new_id))
         } else {
@@ -279,15 +291,12 @@ impl BlockScope {
         new_id
     }
 
-    pub fn create_child_block<'p>(&'p mut self, counter: &mut ScopeCounter) -> &'p mut BlockScope {
-        let new_block = BlockScope::new(counter, self.id);
+    pub fn create_child_block(&mut self, counter: &mut ScopeCounter, block_type: BlockType) -> ScopeId {
+        let new_block = BlockScope::new(counter, self.id, block_type);
+        let new_id = new_block.id;
+        self.push_child(Scope::Block(new_block));
 
-        let new_scope = self.push_child(Scope::Block(new_block));
-
-        match *new_scope {
-            Scope::Block(ref mut inner) => inner,
-            _ => unreachable!(),
-        }
+        new_id
     }
 
     #[allow(unknown_lints, needless_lifetimes)]
