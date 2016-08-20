@@ -2,6 +2,8 @@ use syntax::ast::{self, NodeId, ExprKind, Expr, Stmt, StmtKind, Block};
 use syntax::visit;
 use std::ascii::AsciiExt;
 
+use mar::build::let_tracking::AstMap;
+
 macro_rules! x_counter {
     ($indextype:ident, $name:ident) => (
         pub struct $name {
@@ -26,9 +28,11 @@ pub struct DeclId(u32);
 
 #[derive(Debug)]
 pub struct Decl {
-    ident: ast::Ident,
-    id: NodeId,
-    is_initialized: bool,
+    pub ident: ast::Ident,
+    pub path: NodePath,
+    pub initializations: Vec<NodePath>,
+    pub usages: Vec<NodePath>,
+    pub is_initialized: bool,
 }
 
 #[derive(Debug)]
@@ -38,9 +42,17 @@ pub enum BlockType {
 }
 
 pub struct ScopeTracker {
-    root: Scope,
+    pub root: Scope,
     pub current_scope: ScopeId,
 }
+
+#[derive(Debug)]
+pub struct NodePath {
+    pub scope: ScopeId,
+    pub index: usize,
+    pub id: NodeId,
+}
+
 
 impl ScopeTracker {
 
@@ -59,9 +71,10 @@ impl ScopeTracker {
         }, counter)
     }
 
-    pub fn from_expr(e: Expr) -> ScopeTracker{
+    pub fn from_expr(e: &Expr, map: &AstMap) -> ScopeTracker {
         let (mut tracker, mut counter) = ScopeTracker::new();
-        tracker.mutate_from_expr(&mut counter, &e);
+        tracker.mutate_from_expr(&mut counter, e);
+        tracker.root.find_decl_inits(map);
         tracker
     }
 
@@ -96,6 +109,29 @@ impl ScopeTracker {
                                            .new_arm(counter).id;
 
                     self.set_current_block(arm_scope_id);
+
+                    for pat in &arm.pats {
+                        let index = self.current_block().children.len() - 1;
+                        let current_scope = self.current_scope;
+                        self.current_block().decls.extend(
+                            get_decls_from_pat(pat)
+                            .into_iter()
+                            .map(|(id, identifier)| {
+                                Decl {
+                                    ident: identifier,
+                                    path: NodePath {
+                                        id: id,
+                                        index: index,
+                                        scope: current_scope,
+                                    },
+                                    initializations: vec![],
+                                    usages: vec![],
+                                    is_initialized: true,
+                                }
+                            })
+                        );
+                    }
+
                     self.mutate_from_expr(counter, &arm.body);
                     self.set_current_block(match_id);
                 }
@@ -115,13 +151,21 @@ impl ScopeTracker {
                 self.mutate_from_expr(counter, expr);
             }
             StmtKind::Local(ref local) => {
+                let current_scope = self.current_block().id;
+                let index = self.current_block().children.len();
                 self.current_block().decls.extend(
                     get_decls_from_pat(&local.pat)
                     .into_iter()
                     .map(|(id, identifier)| {
                         Decl {
                             ident: identifier,
-                            id: id,
+                            path: NodePath {
+                                id: id,
+                                index: index,
+                                scope: current_scope,
+                            },
+                            initializations: vec![],
+                            usages: vec![],
                             is_initialized: local.init.is_some(),
                         }
                     })
@@ -314,6 +358,31 @@ impl BlockScope {
     }
 
     #[allow(unknown_lints, needless_lifetimes)]
+    fn nodes<'s>(&'s mut self) -> Vec<(usize, NodeId)> {
+        self.children.iter_mut().enumerate().filter_map(
+            |(idx, s): (usize, &'s mut ScopeOrNode)| {
+                if let ScopeOrNode::Node(inner) = *s {
+                    Some((idx, inner))
+                }
+                else {
+                    None
+                }
+            }
+        ).collect()
+    }
+
+    #[allow(unknown_lints, needless_lifetimes)]
+    pub fn find_scope<'p>(&'p mut self, id: ScopeId) -> &'p mut Scope {
+        self.walk(&mut |scope: &'p mut Scope| {
+            if scope.id() == id {
+                Some(scope)
+            } else {
+                None
+            }
+        }).unwrap()
+    }
+
+    #[allow(unknown_lints, needless_lifetimes)]
     fn walk<'s, T: 's, F: FnMut(&'s mut Scope) -> Option<T> >(&'s mut self, f: &mut F) -> Option<T> {
         for scope in self.scopes() {
             if let Some(v) = scope.walk(f) {
@@ -384,6 +453,60 @@ impl Scope {
             }
         }
     }
+
+    #[allow(unknown_lints, needless_lifetimes)]
+    pub fn find_scope<'p>(&'p mut self, id: ScopeId) -> &'p mut Scope {
+        self.walk(&mut |scope: &'p mut Scope| {
+            if scope.id() == id {
+                Some(scope)
+            } else {
+                None
+            }
+        }).unwrap()
+    }
+
+    fn find_decl_inits(&mut self, ast_map: &AstMap) {
+        self.walk(&mut |s| {
+            if let Scope::Block(ref mut b) = *s {
+                let it = b.nodes().into_iter()
+                        .map(|(idx, x)| (idx, x, ast_map.lookup(x)))
+                        .filter_map(|(idx, id, e)| {
+                            if let ExprKind::Assign(ref lv, _) = e.node {
+                                if let ExprKind::Path(_, ref p) = lv.node {
+                                    if p.segments.len() == 1 {
+                                        return Some((idx, id, p.segments.first().unwrap().identifier))
+                                    }
+                                }
+                            }
+                            None
+                        }
+                );
+                for (idx, id, ident) in it {
+                    let scope_id = b.id;
+                    let was_decl = if let Some(ref mut decl) = b.decls.iter_mut().find(|d| d.ident.name == ident.name) {
+                        if decl.is_initialized {
+                            continue;
+                        }
+
+                        decl.initializations.push(NodePath {
+                            id: id,
+                            index: idx,
+                            scope: scope_id,
+                        });
+                        true
+                    } else { false };
+                    if !was_decl {
+                        if let Some(id) = b.parent_id {
+                            b.find_scope(id).find_decl_inits(ast_map);
+                        }
+                    }
+                    // if let ExprKind::Assign()
+                }
+            }
+            Some(())
+        });
+    }
+
 }
 
 #[derive(Debug)]

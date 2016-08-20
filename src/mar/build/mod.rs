@@ -1,6 +1,7 @@
 use mar::repr::*;
 use syntax::ast::{self, ItemKind};
 use syntax::codemap::Span;
+use syntax::ast::{StmtKind, ExprKind};
 use syntax::ext::base::ExtCtxt;
 use syntax::ptr::P;
 use mar::build::simplify::simplify_item;
@@ -31,6 +32,21 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
 
     let (fn_decl, unsafety, constness, abi, generics, ast_block) = match item.node {
         ItemKind::Fn(fn_decl, unsafety, constness, abi, generics, block) => {
+            for stmt in &block.stmts {
+                match stmt.node {
+                    StmtKind::Expr(ref e) | StmtKind::Semi(ref e) => {
+                        match e.node {
+                            ExprKind::Assign(ref a, ref b) => {
+                                println!("{:?}", a.node);
+                                println!("{:?}", b.node);
+                            },
+                            _ => {}
+                        }
+                        println!("{:#?}", e.node);
+                    }
+                    _ => {}
+                }
+            }
             (fn_decl, unsafety, constness, abi, generics, block)
         }
 
@@ -135,3 +151,4 @@ mod transition;
 mod simplify;
 #[allow(dead_code)]
 mod scope_tracking;
+mod let_tracking;
