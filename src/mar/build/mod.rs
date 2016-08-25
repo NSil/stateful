@@ -4,6 +4,7 @@ use syntax::codemap::Span;
 use syntax::ext::base::ExtCtxt;
 use syntax::ptr::P;
 use mar::build::simplify::simplify_item;
+use mar::build::scope_tracking::ScopeTracker;
 
 #[derive(Debug)]
 pub struct CFG {
@@ -39,6 +40,8 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
             return Err(Error);
         }
     };
+
+    let tracker = ScopeTracker::from_block(&ast_block);
 
     let mut builder = Builder {
         cx: cx,
@@ -83,6 +86,10 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
                 _ => true
             }
         });
+    }
+
+    for bbid in (0..builder.cfg.basic_blocks.len()).map(BasicBlock::new) {
+        let decls = builder.cfg.block_data(bbid).decls.clone();
     }
 
     Ok(Mar {

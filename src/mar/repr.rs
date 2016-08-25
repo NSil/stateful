@@ -130,6 +130,7 @@ pub struct BasicBlockData {
     pub span: Span,
     pub name: Option<&'static str>,
     pub decls: Vec<(VarDecl, ast::Ident)>,
+    pub forward_decls: Vec<(VarDecl, ast::Ident)>,
     pub statements: Vec<Statement>,
     pub terminator: Option<Terminator>,
 }
@@ -143,6 +144,7 @@ impl BasicBlockData {
             span: span,
             name: name,
             decls: decls,
+            forward_decls: Vec::new(),
             statements: vec![],
             terminator: terminator,
         }
