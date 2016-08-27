@@ -89,7 +89,18 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
     }
 
     for bbid in (0..builder.cfg.basic_blocks.len()).map(BasicBlock::new) {
-        let decls = builder.cfg.block_data(bbid).decls.clone();
+
+        for stmt in builder.cfg.block_data(bbid).statements
+                        .iter()
+                        .filter_map(|s| { match *s {
+                            Statement::Expr(ref s) => Some(s.clone()),
+                            _ => None,
+                        }})
+        {
+
+            let scope_id = tracker.scope_map[&stmt.id];
+
+        }
     }
 
     Ok(Mar {
@@ -125,6 +136,7 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
     }
 }
 
+
 ///////////////////////////////////////////////////////////////////////////
 // Builder methods are broken up into modules, depending on what kind
 // of thing is being translated.
@@ -142,3 +154,5 @@ mod transition;
 mod simplify;
 #[allow(dead_code)]
 mod scope_tracking;
+#[allow(dead_code)]
+mod forward_decls;
