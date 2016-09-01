@@ -88,21 +88,11 @@ pub fn construct(cx: &mut ExtCtxt, item: P<ast::Item>) -> Result<Mar, Error> {
         });
     }
 
-    for bbid in (0..builder.cfg.basic_blocks.len()).map(BasicBlock::new) {
-
-        for stmt in builder.cfg.block_data(bbid).statements
-                        .iter()
-                        .filter_map(|s| { match *s {
-                            Statement::Expr(ref s) => Some(s.clone()),
-                            _ => None,
-                        }})
-        {
-
-            let scope_id = tracker.scope_map[&stmt.id];
-
-        }
+    forward_decls::fix_forward_decls(&mut builder.cfg.basic_blocks, &tracker);
+    {
+        let v: Vec<_> = builder.cfg.basic_blocks.iter().enumerate().collect();
+        println!("{:#?}", v);
     }
-
     Ok(Mar {
         ident: item.ident,
         span: item.span,

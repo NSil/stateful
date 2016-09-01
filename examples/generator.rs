@@ -4,13 +4,24 @@
 #![allow(unused_mut)]
 #![allow(non_shorthand_field_patterns)]
 
-#[generator]
-fn gen(item: String) -> String {
-    yield_!(moved!(item));
+fn main() {
+    test_late_init();
 }
 
-fn main() {
-    for value in gen(String::from("wee")) {
-        println!("{}", value);
+fn test_late_init() {
+    #[generator]
+    fn gen() -> u32 {
+        let a;
+        yield_!(1u32);
+        a = 9;
+        yield_!(2);
+        yield_!(3);
+        println!("{:?}", a);
     }
+
+    let mut gen = gen();
+    assert_eq!(gen.next(), Some(1));
+    assert_eq!(gen.next(), Some(2));
+    assert_eq!(gen.next(), Some(3));
+    assert_eq!(gen.next(), None);
 }

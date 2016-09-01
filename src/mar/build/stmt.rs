@@ -60,8 +60,9 @@ impl<'a, 'b: 'a> Builder<'a, 'b> {
                 let alias = self.find_decl(lvalue).map(|alias| {
                     self.alias(block, span, alias)
                 });
-                self.schedule_drop(span, extent, decl, alias);
+                // self.schedule_drop(span, extent, decl, alias);
                 self.cfg.block_data_mut(block).forward_decls.push((decl, lvalue));
+                println!("{:?}", self.cfg.block_data_mut(block).forward_decls);
             }
             return block;
         }

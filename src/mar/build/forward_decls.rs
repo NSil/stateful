@@ -1,7 +1,8 @@
 use mar::repr::*;
 use mar::build::scope_tracking::ScopeTracker;
-use syntax::visit::{Visitor, walk_expr};
-use syntax::ast::{Stmt, StmtKind, Expr, ExprKind, Path, Ident};
+use syntax::visit::{Visitor, walk_expr, walk_mac};
+use syntax::ast::{Stmt, StmtKind, Expr, ExprKind, Path, Ident, Mac, BindingMode, Mutability};
+use aster;
 
 // - Shadowing logic needs to be moved to a different phase.
 
@@ -12,7 +13,7 @@ use syntax::ast::{Stmt, StmtKind, Expr, ExprKind, Path, Ident};
 // Do same for successors.
 
 #[allow(needless_range_loop)]
-fn fix_forward_decls(blocks: &mut [BasicBlockData], tracker: &ScopeTracker) {
+pub fn fix_forward_decls(blocks: &mut [BasicBlockData], tracker: &ScopeTracker) {
     for block_id in 0..blocks.len() {
         {
             let block = &mut blocks[block_id];
@@ -38,16 +39,39 @@ fn fix_forward_decls(blocks: &mut [BasicBlockData], tracker: &ScopeTracker) {
                 None
             }
         }).collect();
+        let mut new_lets: Vec<_> = {
+            let sp = blocks[block_id].span;
+            let mut v = AssignmentVisitor {
+                tracker: tracker,
+                blocks: blocks,
+                block_id: block_id,
+                popped: Vec::new(),
+            };
 
-        let mut v = AssignmentVisitor {
-            tracker: tracker,
-            blocks: blocks,
-            block_id: block_id,
+
+            for stmt in &statements {
+                v.visit_stmt(stmt);
+            }
+
+            let mut builder = aster::AstBuilder::new();
+            v.popped.into_iter().map(|id| {
+                Statement::Let{
+                    span: sp,
+                    pat: builder.pat().id(id),
+                    ty: None,
+                    init: None,
+                }
+            }).collect()
         };
+        new_lets.extend(blocks[block_id].statements.clone());
+        blocks[block_id].statements = new_lets;
 
-        for stmt in &statements {
-            v.visit_stmt(stmt);
+        let fwd: Vec<_> = blocks[block_id].forward_decls.drain(..).collect();
+        let successors = blocks[block_id].terminator().successors();
+        for s in successors {
+            blocks[s.index()].forward_decls.extend(fwd.clone());
         }
+
     }
 }
 
@@ -56,25 +80,46 @@ struct AssignmentVisitor<'a> {
     tracker: &'a ScopeTracker,
     blocks: &'a mut [BasicBlockData],
     block_id: usize,
+    popped: Vec<Ident>,
 }
 
 impl<'a> Visitor for AssignmentVisitor<'a> {
     fn visit_expr(&mut self, expression: &Expr) {
 
         if let Some(id) = get_assign_path(expression) {
-            if self.blocks[self.block_id]
-                .forward_decls
-                .iter()
-                .map(|&(_, d)| d)
-                .any(|d| d.name == id.name) {
+
+            println!("found assign! {:?}", expression);
+
+            let mut assigned_decl = None;
+            let forward_decls = self.blocks[self.block_id].forward_decls.clone();
+            println!("d: {:?}", forward_decls);
+            for (idx, (vd, ident)) in forward_decls.into_iter().enumerate() {
+                if ident.name != id.name {
+                    println!("irrelevant assign {:?}", expression);
+                    continue;
+                }
+                println!("relevant assign {:?}", expression);
                 let successors = self.blocks[self.block_id].terminator().successors();
                 for block_idx in successors {
                     let block = &mut self.blocks[block_idx.index()];
-                    // block.
+                    block.decls.push((vd.clone(), ident.clone()));
                 }
+                assigned_decl = Some(idx);
             }
+            println!("ad: {:?}", assigned_decl);
+
+            if let Some(idx) = assigned_decl {
+                self.popped.push(self.blocks[self.block_id].forward_decls.remove(idx).1);
+            }
+        } else {
+            println!("not assign {:?}", expression);
         }
+
         walk_expr(self, expression);
+    }
+
+    fn visit_mac(&mut self, _mac: &Mac) {
+        walk_mac(self, _mac)
     }
 }
 

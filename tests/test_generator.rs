@@ -56,3 +56,5 @@ fn test_moved() {
     assert_eq!(gen.next(), Some(3));
     assert_eq!(gen.next(), None);
 }
+
+

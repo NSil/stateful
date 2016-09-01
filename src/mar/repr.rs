@@ -246,7 +246,7 @@ pub struct Arm {
 ///////////////////////////////////////////////////////////////////////////
 // Statements
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     Expr(ast::Stmt),
     Let {
